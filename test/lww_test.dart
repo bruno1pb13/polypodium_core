@@ -3,71 +3,19 @@ import 'package:polypodium_core/polypodium_core.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group('shouldApplyRemote', () {
-    test('applies when there is no local row yet', () {
-      expect(
-        shouldApplyRemote(
-          localUpdatedAt: null,
-          remoteUpdatedAt: DateTime(2026, 1, 1),
-        ),
-        isTrue,
-      );
-    });
-
-    test('applies when remote is strictly newer', () {
-      expect(
-        shouldApplyRemote(
-          localUpdatedAt: DateTime(2026, 1, 1),
-          remoteUpdatedAt: DateTime(2026, 1, 2),
-        ),
-        isTrue,
-      );
-    });
-
-    test('rejects when remote is older', () {
-      expect(
-        shouldApplyRemote(
-          localUpdatedAt: DateTime(2026, 1, 2),
-          remoteUpdatedAt: DateTime(2026, 1, 1),
-        ),
-        isFalse,
-      );
-    });
-
-    test('applies on an exact timestamp tie (remote wins ties)', () {
-      final t = DateTime(2026, 1, 1, 12, 0, 0);
-      expect(
-        shouldApplyRemote(localUpdatedAt: t, remoteUpdatedAt: t),
-        isTrue,
-      );
-    });
-
-    test('re-applying the same change is idempotent', () {
-      final t = DateTime(2026, 1, 1, 12, 0, 0);
-      // First apply: no local row yet.
-      expect(
-          shouldApplyRemote(localUpdatedAt: null, remoteUpdatedAt: t), isTrue);
-      // Second apply of the identical change: local now has updatedAt == t.
-      expect(shouldApplyRemote(localUpdatedAt: t, remoteUpdatedAt: t), isTrue);
-    });
-
-    test('compares instants, not wall-clock fields', () {
-      final utc = DateTime.utc(2026, 1, 1, 12);
-      expect(
-        shouldApplyRemote(localUpdatedAt: utc, remoteUpdatedAt: utc.toLocal()),
-        isTrue,
-      );
-      expect(
-        shouldApplyRemote(
-          localUpdatedAt: utc,
-          remoteUpdatedAt: utc.subtract(const Duration(microseconds: 1)),
-        ),
-        isFalse,
-      );
-    });
-  });
-
   group('incomingWins', () {
+    test('applies when there is no stored row yet', () {
+      expect(
+        incomingWins(
+          incomingUpdatedAt: DateTime.utc(2026, 1, 1),
+          incomingDeviceId: 'device-a',
+          currentUpdatedAt: null,
+          currentDeviceId: null,
+        ),
+        isTrue,
+      );
+    });
+
     test('resolves by updatedAt, not arrival order', () {
       // Newer edit stored first, older edit arrives second (out-of-order
       // delivery) -- the older one must lose despite arriving later.
@@ -99,7 +47,7 @@ void main() {
 
     test('tie is broken by the greater deviceId, symmetrically', () {
       final t = DateTime.utc(2026, 1, 1);
-      bool wins(String incoming, String current) => incomingWins(
+      bool wins(String? incoming, String? current) => incomingWins(
             incomingUpdatedAt: t,
             incomingDeviceId: incoming,
             currentUpdatedAt: t,
@@ -107,6 +55,23 @@ void main() {
           );
       expect(wins('device-b', 'device-a'), isTrue);
       expect(wins('device-a', 'device-b'), isFalse);
+      // Two replicas holding each other's version agree on one winner.
+      expect(wins('device-b', 'device-a'), isNot(wins('device-a', 'device-b')));
+    });
+
+    test('a null deviceId compares as the empty string', () {
+      final t = DateTime.utc(2026, 1, 1);
+      bool wins(String? incoming, String? current) => incomingWins(
+            incomingUpdatedAt: t,
+            incomingDeviceId: incoming,
+            currentUpdatedAt: t,
+            currentDeviceId: current,
+          );
+      expect(wins('device-a', null), isTrue);
+      expect(wins(null, 'device-a'), isFalse);
+      expect(wins(null, null), isFalse);
+      expect(wins('', null), isFalse);
+      expect(wins(null, ''), isFalse);
     });
 
     test('compares instants, not wall-clock fields', () {
@@ -119,6 +84,15 @@ void main() {
           currentDeviceId: 'device-a',
         ),
         isTrue,
+      );
+      expect(
+        incomingWins(
+          incomingUpdatedAt: utc.subtract(const Duration(microseconds: 1)),
+          incomingDeviceId: 'device-b',
+          currentUpdatedAt: utc,
+          currentDeviceId: 'device-a',
+        ),
+        isFalse,
       );
     });
   });
@@ -134,26 +108,23 @@ void main() {
             currentDeviceId: v.currentDeviceId,
           ),
           v.incomingWins,
-          reason: 'incomingWins',
-        );
-        expect(
-          shouldApplyRemote(
-            localUpdatedAt: v.currentUpdatedAt,
-            remoteUpdatedAt: v.incomingUpdatedAt,
-          ),
-          v.shouldApplyRemote,
-          reason: 'shouldApplyRemote',
         );
       });
     }
 
-    test('the comparators only diverge on exact-timestamp ties', () {
+    test('null deviceIds behave exactly like the empty string', () {
+      // The server runs these vectors with '' in place of null.
       for (final v in lwwVectors) {
-        if (v.incomingWins != v.shouldApplyRemote) {
-          expect(
-              v.incomingUpdatedAt.isAtSameMomentAs(v.currentUpdatedAt), isTrue,
-              reason: v.description);
-        }
+        expect(
+          incomingWins(
+            incomingUpdatedAt: v.incomingUpdatedAt,
+            incomingDeviceId: v.incomingDeviceId ?? '',
+            currentUpdatedAt: v.currentUpdatedAt,
+            currentDeviceId: v.currentDeviceId ?? '',
+          ),
+          v.incomingWins,
+          reason: v.description,
+        );
       }
     });
   });
