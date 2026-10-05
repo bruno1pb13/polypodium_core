@@ -1,0 +1,12 @@
+name: polypodium_core
+description: Regras e modelos de sync compartilhados entre o app Polypodium e o Polypodium_server.
+version: 0.1.0
+repository: https://github.com/bruno1pb13/polypodium_core
+publish_to: none
+
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.24.0
